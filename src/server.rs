@@ -544,7 +544,7 @@ impl Server {
     ) -> Result<()> {
         let (mut writer, reader) = tokio::io::duplex(BUF_SIZE);
         let filename = try_get_file_name(path)?;
-        set_content_diposition(res, false, &format!("{}.zip", filename))?;
+        set_content_disposition(res, false, &format!("{}.zip", filename))?;
         res.headers_mut()
             .insert("content-type", HeaderValue::from_static("application/zip"));
         if head_only {
@@ -704,7 +704,7 @@ impl Server {
         );
 
         let filename = try_get_file_name(path)?;
-        set_content_diposition(res, true, filename)?;
+        set_content_disposition(res, true, filename)?;
 
         res.headers_mut().typed_insert(AcceptRanges::bytes());
 
@@ -1440,7 +1440,7 @@ fn status_no_content(res: &mut Response) {
     *res.status_mut() = StatusCode::NO_CONTENT;
 }
 
-fn set_content_diposition(res: &mut Response, inline: bool, filename: &str) -> Result<()> {
+fn set_content_disposition(res: &mut Response, inline: bool, filename: &str) -> Result<()> {
     let kind = if inline { "inline" } else { "attachment" };
     let value = if filename.is_ascii() {
         HeaderValue::from_str(&format!("{kind}; filename=\"{}\"", filename,))?
