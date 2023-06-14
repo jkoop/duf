@@ -488,6 +488,7 @@ impl Server {
             let path_buf = path.to_path_buf();
             let hidden = Arc::new(self.args.hidden.to_vec());
             let hidden = hidden.clone();
+            let posix_hidden = self.args.posix_hidden;
             let running = self.running.clone();
             let search_paths = tokio::task::spawn_blocking(move || {
                 let mut paths: Vec<PathBuf> = vec![];
@@ -511,7 +512,7 @@ impl Server {
                                 }
                             }
                         }
-                        if is_hidden(&hidden, base_name, is_dir_type) {
+                        if is_hidden(&hidden, posix_hidden, base_name, is_dir_type) {
                             if file_type.is_dir() {
                                 it.skip_current_dir();
                             }
@@ -552,9 +553,19 @@ impl Server {
         }
         let path = path.to_owned();
         let hidden = self.args.hidden.clone();
+        let posix_hidden = self.args.posix_hidden;
         let running = self.running.clone();
         tokio::spawn(async move {
-            if let Err(e) = zip_dir(&mut writer, &path, access_paths, &hidden, running).await {
+            if let Err(e) = zip_dir(
+                &mut writer,
+                &path,
+                access_paths,
+                &hidden,
+                running,
+                posix_hidden,
+            )
+            .await
+            {
                 error!("Failed to zip {}, {}", path.display(), e);
             }
         });
@@ -1120,7 +1131,12 @@ impl Server {
     async fn add_pathitem(&self, paths: &mut Vec<PathItem>, base_path: &Path, entry_path: &Path) {
         let base_name = get_file_name(entry_path);
         if let Ok(Some(item)) = self.to_pathitem(entry_path, base_path).await {
-            if is_hidden(&self.args.hidden, base_name, item.is_dir()) {
+            if is_hidden(
+                &self.args.hidden,
+                self.args.posix_hidden,
+                base_name,
+                item.is_dir(),
+            ) {
                 return;
             }
             paths.push(item);
@@ -1324,6 +1340,7 @@ async fn zip_dir<W: AsyncWrite + Unpin>(
     access_paths: AccessPaths,
     hidden: &[String],
     running: Arc<AtomicBool>,
+    posix_hidden: bool,
 ) -> Result<()> {
     let mut writer = ZipFileWriter::with_tokio(writer);
     let hidden = Arc::new(hidden.to_vec());
@@ -1351,7 +1368,7 @@ async fn zip_dir<W: AsyncWrite + Unpin>(
                         }
                     }
                 }
-                if is_hidden(&hidden, base_name, is_dir_type) {
+                if is_hidden(&hidden, posix_hidden, base_name, is_dir_type) {
                     if file_type.is_dir() {
                         it.skip_current_dir();
                     }
@@ -1455,7 +1472,11 @@ fn set_content_disposition(res: &mut Response, inline: bool, filename: &str) -> 
     Ok(())
 }
 
-fn is_hidden(hidden: &[String], file_name: &str, is_dir_type: bool) -> bool {
+fn is_hidden(hidden: &[String], posix_hidden: bool, file_name: &str, is_dir_type: bool) -> bool {
+    if posix_hidden && file_name.starts_with('.') {
+        return true;
+    }
+
     hidden.iter().any(|v| {
         if is_dir_type {
             if let Some(x) = v.strip_suffix('/') {

@@ -71,6 +71,14 @@ pub fn build_cli() -> Command {
                 .value_name("value"),
         )
         .arg(
+            Arg::new("posix-hidden")
+                .env("DUFS_POSIX_HIDDEN")
+				.hide_env(true)
+                .long("posix-hidden")
+                .action(ArgAction::SetTrue)
+                .help("Don't show or zip files/folders whose names begin with a \".\"")
+        )
+        .arg(
             Arg::new("auth")
                 .env("DUFS_AUTH")
 				.hide_env(true)
@@ -233,6 +241,7 @@ pub struct Args {
     pub path_prefix: String,
     pub uri_prefix: String,
     pub hidden: Vec<String>,
+    pub posix_hidden: bool,
     pub auth_method: AuthMethod,
     pub auth: AccessControl,
     pub allow_upload: bool,
@@ -279,6 +288,7 @@ impl Args {
             .get_one::<String>("hidden")
             .map(|v| v.split(',').map(|x| x.to_string()).collect())
             .unwrap_or_default();
+        let posix_hidden = matches.get_flag("posix-hidden");
         let enable_cors = matches.get_flag("enable-cors");
         let auth: Vec<&str> = matches
             .get_many::<String>("auth")
@@ -329,6 +339,7 @@ impl Args {
             path_prefix,
             uri_prefix,
             hidden,
+            posix_hidden,
             auth_method,
             auth,
             enable_cors,

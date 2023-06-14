@@ -58,6 +58,7 @@ Options:
   -p, --port <port>          Specify port to listen on [default: 5000]
       --path-prefix <path>   Specify a path prefix
       --hidden <value>       Hide paths from directory listings, separated by `,`
+      --posix-hidden         Don't show or zip files/folders whose names begin with a "."
   -a, --auth <rules>         Add auth role
       --auth-method <value>  Select auth method [default: digest] [possible values: basic, digest]
   -A, --allow-all            Allow all operations
@@ -312,6 +313,7 @@ All options can be set using environment variables prefixed with `DUFS_`.
   -p, --port <port>           DUFS_PORT=5000
       --path-prefix <path>    DUFS_PATH_RREFIX=/path
       --hidden <value>        DUFS_HIDDEN=*.log
+      --posix-hidden          DUFS_POSIX_HIDDEN=true
   -a, --auth <rules>          DUFS_AUTH="admin:admin@/:rw|@/" 
       --auth-method <value>   DUFS_AUTH_METHOD=basic
   -A, --allow-all             DUFS_ALLOW_ALL=true
