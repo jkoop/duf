@@ -13,6 +13,7 @@ use xml::escape::escape_str_pcdata;
 use async_zip::tokio::write::ZipFileWriter;
 use async_zip::{Compression, ZipDateTime, ZipEntryBuilder};
 use chrono::{LocalResult, TimeZone, Utc};
+use fs_extra::dir::get_size;
 use futures::TryStreamExt;
 use headers::{
     AcceptRanges, AccessControlAllowCredentials, AccessControlAllowOrigin, ContentLength,
@@ -1160,7 +1161,13 @@ impl Server {
         };
         let mtime = to_timestamp(&meta.modified()?);
         let size = match path_type {
-            PathType::Dir | PathType::SymlinkDir => None,
+            PathType::Dir | PathType::SymlinkDir => {
+                if self.args.dir_size {
+                    Some(get_size(fs::canonicalize(Path::new(path)).await?)?) // this ignores authorizations and filters, and just does a blind sum
+                } else {
+                    None
+                }
+            }
             PathType::File | PathType::SymlinkFile => Some(meta.len()),
         };
         let rel_path = path.strip_prefix(base_path)?;

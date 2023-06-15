@@ -79,6 +79,14 @@ pub fn build_cli() -> Command {
                 .help("Don't show or zip files/folders whose names begin with a \".\"")
         )
         .arg(
+            Arg::new("dir-size")
+                .env("DUFS_DIR_SIZE")
+				.hide_env(true)
+                .long("dir-size")
+                .action(ArgAction::SetTrue)
+                .help("Show sizes of folders in directory listing (synchronous; needs fast disk; doesn't consider auth during recursion)")
+        )
+        .arg(
             Arg::new("auth")
                 .env("DUFS_AUTH")
 				.hide_env(true)
@@ -178,7 +186,7 @@ pub fn build_cli() -> Command {
 				.hide_env(true)
                 .long("render-spa")
                 .action(ArgAction::SetTrue)
-                .help("Serve SPA(Single Page Application)"),
+                .help("Serve SPA(Single Page Application) from `./index.html`"),
         )
         .arg(
             Arg::new("assets")
@@ -242,6 +250,7 @@ pub struct Args {
     pub uri_prefix: String,
     pub hidden: Vec<String>,
     pub posix_hidden: bool,
+    pub dir_size: bool,
     pub auth_method: AuthMethod,
     pub auth: AccessControl,
     pub allow_upload: bool,
@@ -289,6 +298,7 @@ impl Args {
             .map(|v| v.split(',').map(|x| x.to_string()).collect())
             .unwrap_or_default();
         let posix_hidden = matches.get_flag("posix-hidden");
+        let dir_size = matches.get_flag("dir-size");
         let enable_cors = matches.get_flag("enable-cors");
         let auth: Vec<&str> = matches
             .get_many::<String>("auth")
@@ -340,6 +350,7 @@ impl Args {
             uri_prefix,
             hidden,
             posix_hidden,
+            dir_size,
             auth_method,
             auth,
             enable_cors,

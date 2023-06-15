@@ -59,6 +59,7 @@ Options:
       --path-prefix <path>   Specify a path prefix
       --hidden <value>       Hide paths from directory listings, separated by `,`
       --posix-hidden         Don't show or zip files/folders whose names begin with a "."
+      --dir-size             Show sizes of folders in directory listing (synchronous; needs fast disk; doesn't consider auth during recursion)
   -a, --auth <rules>         Add auth role
       --auth-method <value>  Select auth method [default: digest] [possible values: basic, digest]
   -A, --allow-all            Allow all operations
@@ -328,6 +329,7 @@ All options can be set using environment variables prefixed with `DUFS_`.
       --path-prefix <path>    DUFS_PATH_RREFIX=/path
       --hidden <value>        DUFS_HIDDEN=*.log
       --posix-hidden          DUFS_POSIX_HIDDEN=true
+      --dir-size              DUFS_DIR_SIZE=true
   -a, --auth <rules>          DUFS_AUTH="admin:admin@/:rw|@/"
       --auth-method <value>   DUFS_AUTH_METHOD=basic
   -A, --allow-all             DUFS_ALLOW_ALL=true
