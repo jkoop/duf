@@ -403,7 +403,7 @@ function addPath(file, index) {
     ${getPathSvg(file.path_type)}
   </td>
   <td class="path cell-name">
-    <a href="${url}" ${isDir ? "" : `target="_blank"`}>${encodedName}</a>
+    <a href="${url}">${encodedName}</a>
   </td>
   <td class="cell-mtime">${formatMtime(file.mtime)}</td>
   <td class="cell-size">${formatSize(file.size).join(" ")}</td>
@@ -813,12 +813,12 @@ async function assertResOK(res) {
 }
 
 function getEncoding(contentType) {
-    const charset = contentType?.split(";")[1];
-    if (/charset/i.test(charset)) {
-      let encoding = charset.split("=")[1];
-      if (encoding) {
-        return encoding.toLowerCase()
-      }
+  const charset = contentType?.split(";")[1];
+  if (/charset/i.test(charset)) {
+    let encoding = charset.split("=")[1];
+    if (encoding) {
+      return encoding.toLowerCase()
     }
-    return 'utf-8'
+  }
+  return 'utf-8'
 }

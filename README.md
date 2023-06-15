@@ -130,13 +130,14 @@ Require username/password
 dufs -a admin:123@/:rw
 ```
 
-Listen on specific host:ip 
+Listen on specific host:ip
 
 ```
 dufs -b 127.0.0.1 -p 80
 ```
 
 Listen on unix socket
+
 ```
 dufs -b /tmp/dufs.socket
 ```
@@ -156,6 +157,7 @@ curl -T path-to-file http://127.0.0.1:5000/new-path/path-to-file
 ```
 
 Download a file
+
 ```
 curl http://127.0.0.1:5000/path-to-file
 ```
@@ -209,6 +211,7 @@ Dufs supports account based access control. You can control who can do what on w
 ```
 dufs -a [user:pass]@path[:rw][,path[:rw]...][|...]
 ```
+
 1: Multiple rules are separated by "|"
 2: User and pass are the account name and password, if omitted, it is an anonymous user
 3: One rule can set multiple paths, separated by ","
@@ -217,33 +220,39 @@ dufs -a [user:pass]@path[:rw][,path[:rw]...][|...]
 ```
 dufs -A -a admin:admin@/:rw
 ```
+
 `admin` has all permissions for all paths.
 
 ```
 dufs -A -a admin:admin@/:rw -a guest:guest@/
 ```
+
 `guest` has readonly permissions for all paths.
 
 ```
 dufs -A -a admin:admin@/:rw -a @/
 ```
+
 All paths is public, everyone can view/download it.
 
 ```
 dufs -A -a admin:admin@/:rw -a user1:pass1@/user1:rw -a user2:pass2@/user2
 dufs -A -a "admin:admin@/:rw|user1:pass1@/user1:rw|user2:pass2@/user2"
 ```
+
 `user1` has all permissions for `/user1/*` path.
 `user2` has all permissions for `/user2/*` path.
 
 ```
 dufs -A -a user:pass@/dir1:rw,/dir2:rw,dir3
 ```
+
 `user` has all permissions for `/dir1/*` and `/dir2/*`, has readonly permissions for `/dir3/`.
 
 ```
 dufs -a admin:admin@/
 ```
+
 Since dufs only allows viewing/downloading, `admin` can only view/download files.
 
 ### Hide Paths
@@ -274,31 +283,36 @@ The log format can use following variables.
 | $remote_user | user name supplied with authentication                                    |
 | $request     | full original request line                                                |
 | $status      | response status                                                           |
-| $http_       | arbitrary request header field. examples: $http_user_agent, $http_referer |
-
+| $http\_      | arbitrary request header field. examples: $http_user_agent, $http_referer |
 
 The default log format is `'$remote_addr "$request" $status'`.
+
 ```
 2022-08-06T06:59:31+08:00 INFO - 127.0.0.1 "GET /" 200
 ```
 
 Disable http log
+
 ```
 dufs --log-format=''
 ```
 
 Log user-agent
+
 ```
 dufs --log-format '$remote_addr "$request" $status $http_user_agent'
 ```
+
 ```
 2022-08-06T06:53:55+08:00 INFO - 127.0.0.1 "GET /" 200 Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/104.0.0.0 Safari/537.36
 ```
 
 Log remote-user
+
 ```
 dufs --log-format '$remote_addr $remote_user "$request" $status' -a /@admin:admin -a /folder1@user1:pass1
 ```
+
 ```
 2022-08-06T07:04:37+08:00 INFO - 127.0.0.1 admin "GET /" 200
 ```
@@ -314,7 +328,7 @@ All options can be set using environment variables prefixed with `DUFS_`.
       --path-prefix <path>    DUFS_PATH_RREFIX=/path
       --hidden <value>        DUFS_HIDDEN=*.log
       --posix-hidden          DUFS_POSIX_HIDDEN=true
-  -a, --auth <rules>          DUFS_AUTH="admin:admin@/:rw|@/" 
+  -a, --auth <rules>          DUFS_AUTH="admin:admin@/:rw|@/"
       --auth-method <value>   DUFS_AUTH_METHOD=basic
   -A, --allow-all             DUFS_ALLOW_ALL=true
       --allow-upload          DUFS_ALLOW_UPLOAD=true
@@ -345,7 +359,7 @@ Your assets folder must contains a `index.html` file.
 `index.html` can use the following placeholder variables to retrieve internal data.
 
 - `__INDEX_DATA__`: directory listing data
-- `__ASSERTS_PREFIX__`: assets url prefix
+- `__ASSETS_PREFIX__`: assets url prefix
 
 </details>
 
