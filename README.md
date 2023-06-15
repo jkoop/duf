@@ -70,7 +70,7 @@ Options:
       --enable-cors          Enable CORS, sets `Access-Control-Allow-Origin: *`
       --render-index         Serve index.html when requesting a directory, returns 404 if not found index.html
       --render-try-index     Serve index.html when requesting a directory, returns directory listing if not found index.html
-      --render-spa           Serve SPA(Single Page Application)
+      --render-spa           Serve SPA(Single Page Application) from `./index.html`
       --assets <path>        Use custom assets to override builtin assets
       --tls-cert <path>      Path to an SSL/TLS certificate to serve with HTTPS
       --tls-key <path>       Path to the SSL/TLS certificate's private key
@@ -112,7 +112,7 @@ Serve a single file
 dufs linux-distro.iso
 ```
 
-Serve a single-page application like react/vue
+Serve a single-page application (like react/vue) from `./index.html`
 
 ```
 dufs --render-spa
