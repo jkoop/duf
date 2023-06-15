@@ -26,7 +26,7 @@ macro_rules! fetch {
 
 #[allow(dead_code)]
 pub fn retrieve_index_paths(content: &str) -> IndexSet<String> {
-    let value = retrive_json(content).unwrap();
+    let value = retrieve_json(content).unwrap();
     let paths = value
         .get("paths")
         .unwrap()
@@ -47,8 +47,8 @@ pub fn retrieve_index_paths(content: &str) -> IndexSet<String> {
 }
 
 #[allow(dead_code)]
-pub fn retrive_edit_file(content: &str) -> Option<bool> {
-    let value = retrive_json(content)?;
+pub fn retrieve_edit_file(content: &str) -> Option<bool> {
+    let value = retrieve_json(content)?;
     let value = value.get("editable").unwrap();
     Some(value.as_bool().unwrap())
 }
@@ -59,7 +59,7 @@ pub fn encode_uri(v: &str) -> String {
     parts.join("/")
 }
 
-fn retrive_json(content: &str) -> Option<Value> {
+fn retrieve_json(content: &str) -> Option<Value> {
     let lines: Vec<&str> = content.lines().collect();
     let line = lines.iter().find(|v| v.contains("DATA ="))?;
     let line_col = line.find("DATA =").unwrap() + 6;
