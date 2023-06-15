@@ -176,12 +176,11 @@ class Uploader {
 
   progress(event) {
     const now = Date.now();
-    const speed = (event.loaded - this.uploaded) / (now - this.lastUptime) * 1000;
-    const [speedValue, speedUnit] = formatSize(speed);
-    const speedText = `${speedValue}${speedUnit.toLowerCase()}/s`;
+    const speed = (event.loaded - this.uploaded) / Math.max((now - this.lastUptime) * 1000, 1);
     const progress = formatPercent((event.loaded / event.total) * 100);
     const duration = formatDuration((event.total - event.loaded) / speed)
-    this.$uploadStatus.innerHTML = `<span>${speedText}</span><span>${progress}</span><span>${duration}</span>`;
+    const speedHTML = getSizeHTML(speed) + "/s";
+    this.$uploadStatus.innerHTML = `<span>${speedHTML}</span><span>${progress}</span><span>${duration}</span>`;
     this.uploaded = event.loaded;
     this.lastUptime = now;
   }
@@ -406,7 +405,7 @@ function addPath(file, index) {
     <a href="${url}">${encodedName}</a>
   </td>
   <td class="cell-mtime">${formatMtime(file.mtime)}</td>
-  <td class="cell-size">${formatSize(file.size).join(" ")}</td>
+  <td class="cell-size">${getSizeHTML(file.size)}</td>
   ${actionCell}
 </tr>`)
 }
@@ -774,14 +773,24 @@ function padZero(value, size) {
 
 function formatSize(size) {
   if (size == null) return []
-  const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
-  if (size == 0) return [0, "B"];
+  if (size == 0) return { major: 0, minor: 0, unit: 'B' };
+  const sizes = ['B', 'kB', 'MB', 'GB', 'TB', 'PB', 'EB', 'ZB', 'YB', 'RB', 'QB']; // https://en.wikipedia.org/wiki/Metric_prefix#List_of_SI_prefixes
   const i = parseInt(Math.floor(Math.log(size) / Math.log(1024)));
-  ratio = 1
-  if (i >= 3) {
-    ratio = 100
+  number = size / Math.pow(1024, i);
+  return {
+    major: Math.floor(number),
+    minor: number - Math.floor(number),
+    unit: sizes[i],
+  };
+}
+
+function getSizeHTML(size) {
+  const formattedSize = formatSize(size);
+  if (("" + formattedSize.major).length < 3 && formattedSize.unit != 'B') {
+    return `${formattedSize.major}<span class="size-minor-part">.${("" + formattedSize.minor + ".0").substring(2, 5 - ("" + formattedSize.major).length)}</span> ${formattedSize.unit}`;
+  } else {
+    return `${formattedSize.major} ${formattedSize.unit}`;
   }
-  return [Math.round(size * ratio / Math.pow(1024, i), 2) / ratio, sizes[i]];
 }
 
 function formatDuration(seconds) {

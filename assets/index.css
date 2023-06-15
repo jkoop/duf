@@ -164,6 +164,15 @@ body {
   padding-left: 0.6em;
 }
 
+.size-minor-part {
+  display: none;
+}
+
+tr:hover .size-minor-part {
+  display: inline;
+  opacity: 0.5;
+}
+
 .path svg {
   height: 16px;
   fill: rgba(3, 47, 98, 0.5);
