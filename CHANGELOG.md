@@ -2,6 +2,72 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.38.0] - 2023-11-28
+
+### Bug Fixes
+
+- Unable to start if config file omit bind/port fields ([#294](https://github.com/sigoden/dufs/issues/294))
+
+### Features
+
+- Password can contain `:` `@` `|` ([#297](https://github.com/sigoden/dufs/issues/297))
+- Deprecate the use of `|` to separate auth rules ([#298](https://github.com/sigoden/dufs/issues/298))
+- More flexible config values ([#299](https://github.com/sigoden/dufs/issues/299))
+- Ui supports view file ([#301](https://github.com/sigoden/dufs/issues/301))
+
+### Refactor
+
+- Take improvements from the edge browser ([#289](https://github.com/sigoden/dufs/issues/289))
+- Ui change the cursor for upload-btn to a pointer ([#291](https://github.com/sigoden/dufs/issues/291))
+- Ui improve uploading progress ([#296](https://github.com/sigoden/dufs/issues/296))
+
+## [0.37.1] - 2023-11-08
+
+### Bug Fixes
+
+- Use DUFS_CONFIG to specify the config file path ([#286](https://github.com/sigoden/dufs/issues/286)
+
+## [0.37.0] - 2023-11-08
+
+### Bug Fixes
+
+- Sort path ignore case ([#264](https://github.com/sigoden/dufs/issues/264))
+- Ui show user-name next to the user-icon ([#278](https://github.com/sigoden/dufs/issues/278))
+- Auto delete half-uploaded files ([#280](https://github.com/sigoden/dufs/issues/280))
+
+### Features
+
+- Deprecate `--auth-method`,  as both options are available ([#279](https://github.com/sigoden/dufs/issues/279))
+- Support config file with `--config` option ([#281](https://github.com/sigoden/dufs/issues/281))
+- Support hashed password ([#283](https://github.com/sigoden/dufs/issues/283))
+
+### Refactor
+
+- Remove one clone on `assets_prefix` ([#270](https://github.com/sigoden/dufs/issues/270))
+- Optimize tests
+- Improve code quanity ([#282](https://github.com/sigoden/dufs/issues/282))
+
+## [0.36.0] - 2023-08-24
+
+### Bug Fixes
+
+- Ui readonly if no write perm ([#258](https://github.com/sigoden/dufs/issues/258))
+
+### Testing
+
+- Remove dependency on native tls ([#255](https://github.com/sigoden/dufs/issues/255))
+
+## [0.35.0] - 2023-08-14
+
+### Bug Fixes
+
+- Search should ignore entry path ([#235](https://github.com/sigoden/dufs/issues/235))
+- Typo __ASSERTS_PREFIX__ ([#252](https://github.com/sigoden/dufs/issues/252))
+
+### Features
+
+- Sort by type first, then sort by name/mtime/size ([#241](https://github.com/sigoden/dufs/issues/241))
+
 ## [0.34.2] - 2023-06-05
 
 ### Bug Fixes

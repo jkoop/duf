@@ -1,23 +1,29 @@
-use std::{collections::HashMap, str::FromStr, sync::Arc};
+use std::{collections::HashMap, str::FromStr};
 
-use crate::{args::Args, server::Request};
+use crate::{auth::get_auth_user, server::Request};
 
 pub const DEFAULT_LOG_FORMAT: &str = r#"$remote_addr "$request" $status"#;
 
-#[derive(Debug)]
-pub struct LogHttp {
+#[derive(Debug, Clone, PartialEq)]
+pub struct HttpLogger {
     elements: Vec<LogElement>,
 }
 
-#[derive(Debug)]
+impl Default for HttpLogger {
+    fn default() -> Self {
+        DEFAULT_LOG_FORMAT.parse().unwrap()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 enum LogElement {
     Variable(String),
     Header(String),
     Literal(String),
 }
 
-impl LogHttp {
-    pub fn data(&self, req: &Request, args: &Arc<Args>) -> HashMap<String, String> {
+impl HttpLogger {
+    pub fn data(&self, req: &Request) -> HashMap<String, String> {
         let mut data = HashMap::default();
         for element in self.elements.iter() {
             match element {
@@ -26,10 +32,8 @@ impl LogHttp {
                         data.insert(name.to_string(), format!("{} {}", req.method(), req.uri()));
                     }
                     "remote_user" => {
-                        if let Some(user) = req
-                            .headers()
-                            .get("authorization")
-                            .and_then(|v| args.auth_method.get_user(v))
+                        if let Some(user) =
+                            req.headers().get("authorization").and_then(get_auth_user)
                         {
                             data.insert(name.to_string(), user);
                         }
@@ -66,7 +70,7 @@ impl LogHttp {
     }
 }
 
-impl FromStr for LogHttp {
+impl FromStr for HttpLogger {
     type Err = anyhow::Error;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let mut elements = vec![];

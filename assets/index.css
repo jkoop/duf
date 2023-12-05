@@ -73,6 +73,10 @@ body {
   display: none;
 }
 
+.upload-file label {
+  cursor: pointer;
+}
+
 .searchbar {
   display: flex;
   flex-wrap: nowrap;
@@ -103,11 +107,6 @@ body {
   cursor: pointer;
 }
 
-.upload-status span {
-  width: 70px;
-  display: inline-block;
-}
-
 .main {
   padding: 3.3em 1em 0;
 }
@@ -132,6 +131,11 @@ body {
 .uploaders-table .cell-status {
   width: 80px;
   padding-left: 0.6em;
+}
+
+.cell-status span {
+  width: 80px;
+  display: inline-block;
 }
 
 .paths-table thead a {
@@ -217,16 +221,27 @@ tr:hover .size-minor-part {
   height: calc(100vh - 5rem);
   border: 1px solid #ced4da;
   outline: none;
+  padding: 5px;
 }
 
-.toolbox2 {
+.toolbox-right {
   margin-left: auto;
   margin-right: 2em;
 }
 
 .save-btn {
   cursor: pointer;
+  -webkit-user-select: none;
   user-select: none;
+}
+
+.user-btn {
+    display: flex;
+    align-items: center;
+}
+
+.user-name {
+  padding-left: 3px;
 }
 
 .not-editable {

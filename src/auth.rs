@@ -11,10 +11,10 @@ use std::{
 };
 use uuid::Uuid;
 
-use crate::utils::unix_now;
+use crate::{args::Args, utils::unix_now};
 
 const REALM: &str = "DUFS";
-const DIGEST_AUTH_TIMEOUT: u32 = 86400;
+const DIGEST_AUTH_TIMEOUT: u32 = 604800; // 7 days
 
 lazy_static! {
     static ref NONCESTARTHASH: Context = {
@@ -25,49 +25,64 @@ lazy_static! {
     };
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct AccessControl {
+    use_hashed_password: bool,
     users: IndexMap<String, (String, AccessPaths)>,
     anony: Option<AccessPaths>,
+}
+
+impl Default for AccessControl {
+    fn default() -> Self {
+        AccessControl {
+            use_hashed_password: false,
+            anony: Some(AccessPaths::new(AccessPerm::ReadWrite)),
+            users: IndexMap::new(),
+        }
+    }
 }
 
 impl AccessControl {
     pub fn new(raw_rules: &[&str]) -> Result<Self> {
         if raw_rules.is_empty() {
-            return Ok(AccessControl {
-                anony: Some(AccessPaths::new(AccessPerm::ReadWrite)),
-                users: IndexMap::new(),
-            });
+            return Ok(Default::default());
         }
-
+        let new_raw_rules = compact_split_rules(raw_rules);
+        if new_raw_rules.len() != raw_rules.len() {
+            eprintln!("Warning: deprecate the use of `|` to separate auth rules.")
+        }
+        let mut use_hashed_password = false;
         let create_err = |v: &str| anyhow!("Invalid auth `{v}`");
         let mut anony = None;
         let mut anony_paths = vec![];
         let mut users = IndexMap::new();
-        for rule in raw_rules {
-            let (user, list) = rule.split_once('@').ok_or_else(|| create_err(rule))?;
-            if user.is_empty() && anony.is_some() {
+        for rule in &new_raw_rules {
+            let (account, paths) = split_account_paths(rule).ok_or_else(|| create_err(rule))?;
+            if account.is_empty() && anony.is_some() {
                 bail!("Invalid auth, duplicate anonymous rules");
             }
-            let mut paths = AccessPaths::default();
-            for value in list.trim_matches(',').split(',') {
-                let (path, perm) = match value.split_once(':') {
-                    None => (value, AccessPerm::ReadOnly),
+            let mut access_paths = AccessPaths::default();
+            for item in paths.trim_matches(',').split(',') {
+                let (path, perm) = match item.split_once(':') {
+                    None => (item, AccessPerm::ReadOnly),
                     Some((path, "rw")) => (path, AccessPerm::ReadWrite),
                     _ => return Err(create_err(rule)),
                 };
-                if user.is_empty() {
+                if account.is_empty() {
                     anony_paths.push((path, perm));
                 }
-                paths.add(path, perm);
+                access_paths.add(path, perm);
             }
-            if user.is_empty() {
-                anony = Some(paths);
-            } else if let Some((user, pass)) = user.split_once(':') {
+            if account.is_empty() {
+                anony = Some(access_paths);
+            } else if let Some((user, pass)) = account.split_once(':') {
                 if user.is_empty() || pass.is_empty() {
                     return Err(create_err(rule));
                 }
-                users.insert(user.to_string(), (pass.to_string(), paths));
+                if pass.starts_with("$6$") {
+                    use_hashed_password = true;
+                }
+                users.insert(user.to_string(), (pass.to_string(), access_paths));
             } else {
                 return Err(create_err(rule));
             }
@@ -77,7 +92,11 @@ impl AccessControl {
                 paths.add(path, perm)
             }
         }
-        Ok(Self { users, anony })
+        Ok(Self {
+            use_hashed_password,
+            users,
+            anony,
+        })
     }
 
     pub fn exist(&self) -> bool {
@@ -89,18 +108,14 @@ impl AccessControl {
         path: &str,
         method: &Method,
         authorization: Option<&HeaderValue>,
-        auth_method: AuthMethod,
     ) -> (Option<String>, Option<AccessPaths>) {
         if let Some(authorization) = authorization {
-            if let Some(user) = auth_method.get_user(authorization) {
+            if let Some(user) = get_auth_user(authorization) {
                 if let Some((pass, paths)) = self.users.get(&user) {
                     if method == Method::OPTIONS {
                         return (Some(user), Some(AccessPaths::new(AccessPerm::ReadOnly)));
                     }
-                    if auth_method
-                        .check(authorization, method.as_str(), &user, pass)
-                        .is_some()
-                    {
+                    if check_auth(authorization, method.as_str(), &user, pass).is_some() {
                         return (Some(user), paths.find(path, !is_readonly_method(method)));
                     } else {
                         return (None, None);
@@ -243,147 +258,127 @@ impl AccessPerm {
     }
 }
 
-fn is_readonly_method(method: &Method) -> bool {
-    method == Method::GET
-        || method == Method::OPTIONS
-        || method == Method::HEAD
-        || method.as_str() == "PROPFIND"
+pub fn www_authenticate(args: &Args) -> Result<HeaderValue> {
+    let value = if args.auth.use_hashed_password {
+        format!("Basic realm=\"{}\"", REALM)
+    } else {
+        let nonce = create_nonce()?;
+        format!(
+            "Digest realm=\"{}\", nonce=\"{}\", qop=\"auth\", Basic realm=\"{}\"",
+            REALM, nonce, REALM
+        )
+    };
+    Ok(HeaderValue::from_str(&value)?)
 }
 
-#[derive(Debug, Clone)]
-pub enum AuthMethod {
-    Basic,
-    Digest,
+pub fn get_auth_user(authorization: &HeaderValue) -> Option<String> {
+    if let Some(value) = strip_prefix(authorization.as_bytes(), b"Basic ") {
+        let value: Vec<u8> = general_purpose::STANDARD.decode(value).ok()?;
+        let parts: Vec<&str> = std::str::from_utf8(&value).ok()?.split(':').collect();
+        Some(parts[0].to_string())
+    } else if let Some(value) = strip_prefix(authorization.as_bytes(), b"Digest ") {
+        let digest_map = to_headermap(value).ok()?;
+        let username = digest_map.get(b"username".as_ref())?;
+        std::str::from_utf8(username).map(|v| v.to_string()).ok()
+    } else {
+        None
+    }
 }
 
-impl AuthMethod {
-    pub fn www_auth(&self) -> Result<String> {
-        match self {
-            AuthMethod::Basic => Ok(format!("Basic realm=\"{REALM}\"")),
-            AuthMethod::Digest => Ok(format!(
-                "Digest realm=\"{}\",nonce=\"{}\",qop=\"auth\"",
-                REALM,
-                create_nonce()?,
-            )),
+pub fn check_auth(
+    authorization: &HeaderValue,
+    method: &str,
+    auth_user: &str,
+    auth_pass: &str,
+) -> Option<()> {
+    if let Some(value) = strip_prefix(authorization.as_bytes(), b"Basic ") {
+        let value: Vec<u8> = general_purpose::STANDARD.decode(value).ok()?;
+        let parts: Vec<&str> = std::str::from_utf8(&value).ok()?.split(':').collect();
+
+        if parts[0] != auth_user {
+            return None;
         }
-    }
 
-    pub fn get_user(&self, authorization: &HeaderValue) -> Option<String> {
-        match self {
-            AuthMethod::Basic => {
-                let value: Vec<u8> = general_purpose::STANDARD
-                    .decode(strip_prefix(authorization.as_bytes(), b"Basic ")?)
-                    .ok()?;
-                let parts: Vec<&str> = std::str::from_utf8(&value).ok()?.split(':').collect();
-                Some(parts[0].to_string())
+        if auth_pass.starts_with("$6$") {
+            if let Ok(()) = sha_crypt::sha512_check(parts[1], auth_pass) {
+                return Some(());
             }
-            AuthMethod::Digest => {
-                let digest_value = strip_prefix(authorization.as_bytes(), b"Digest ")?;
-                let digest_map = to_headermap(digest_value).ok()?;
-                digest_map
-                    .get(b"username".as_ref())
-                    .and_then(|b| std::str::from_utf8(b).ok())
-                    .map(|v| v.to_string())
-            }
+        } else if parts[1] == auth_pass {
+            return Some(());
         }
-    }
 
-    fn check(
-        &self,
-        authorization: &HeaderValue,
-        method: &str,
-        auth_user: &str,
-        auth_pass: &str,
-    ) -> Option<()> {
-        match self {
-            AuthMethod::Basic => {
-                let basic_value: Vec<u8> = general_purpose::STANDARD
-                    .decode(strip_prefix(authorization.as_bytes(), b"Basic ")?)
-                    .ok()?;
-                let parts: Vec<&str> = std::str::from_utf8(&basic_value).ok()?.split(':').collect();
-
-                if parts[0] != auth_user {
-                    return None;
-                }
-
-                if parts[1] == auth_pass {
-                    return Some(());
-                }
-
-                None
+        None
+    } else if let Some(value) = strip_prefix(authorization.as_bytes(), b"Digest ") {
+        let digest_map = to_headermap(value).ok()?;
+        if let (Some(username), Some(nonce), Some(user_response)) = (
+            digest_map
+                .get(b"username".as_ref())
+                .and_then(|b| std::str::from_utf8(b).ok()),
+            digest_map.get(b"nonce".as_ref()),
+            digest_map.get(b"response".as_ref()),
+        ) {
+            match validate_nonce(nonce) {
+                Ok(true) => {}
+                _ => return None,
             }
-            AuthMethod::Digest => {
-                let digest_value = strip_prefix(authorization.as_bytes(), b"Digest ")?;
-                let digest_map = to_headermap(digest_value).ok()?;
-                if let (Some(username), Some(nonce), Some(user_response)) = (
-                    digest_map
-                        .get(b"username".as_ref())
-                        .and_then(|b| std::str::from_utf8(b).ok()),
-                    digest_map.get(b"nonce".as_ref()),
-                    digest_map.get(b"response".as_ref()),
-                ) {
-                    match validate_nonce(nonce) {
-                        Ok(true) => {}
-                        _ => return None,
-                    }
-                    if auth_user != username {
-                        return None;
-                    }
+            if auth_user != username {
+                return None;
+            }
 
-                    let mut h = Context::new();
-                    h.consume(format!("{}:{}:{}", auth_user, REALM, auth_pass).as_bytes());
-                    let auth_pass = format!("{:x}", h.compute());
+            let mut h = Context::new();
+            h.consume(format!("{}:{}:{}", auth_user, REALM, auth_pass).as_bytes());
+            let auth_pass = format!("{:x}", h.compute());
 
-                    let mut ha = Context::new();
-                    ha.consume(method);
-                    ha.consume(b":");
-                    if let Some(uri) = digest_map.get(b"uri".as_ref()) {
-                        ha.consume(uri);
-                    }
-                    let ha = format!("{:x}", ha.compute());
-                    let mut correct_response = None;
-                    if let Some(qop) = digest_map.get(b"qop".as_ref()) {
-                        if qop == &b"auth".as_ref() || qop == &b"auth-int".as_ref() {
-                            correct_response = Some({
-                                let mut c = Context::new();
-                                c.consume(&auth_pass);
-                                c.consume(b":");
-                                c.consume(nonce);
-                                c.consume(b":");
-                                if let Some(nc) = digest_map.get(b"nc".as_ref()) {
-                                    c.consume(nc);
-                                }
-                                c.consume(b":");
-                                if let Some(cnonce) = digest_map.get(b"cnonce".as_ref()) {
-                                    c.consume(cnonce);
-                                }
-                                c.consume(b":");
-                                c.consume(qop);
-                                c.consume(b":");
-                                c.consume(&*ha);
-                                format!("{:x}", c.compute())
-                            });
+            let mut ha = Context::new();
+            ha.consume(method);
+            ha.consume(b":");
+            if let Some(uri) = digest_map.get(b"uri".as_ref()) {
+                ha.consume(uri);
+            }
+            let ha = format!("{:x}", ha.compute());
+            let mut correct_response = None;
+            if let Some(qop) = digest_map.get(b"qop".as_ref()) {
+                if qop == &b"auth".as_ref() || qop == &b"auth-int".as_ref() {
+                    correct_response = Some({
+                        let mut c = Context::new();
+                        c.consume(&auth_pass);
+                        c.consume(b":");
+                        c.consume(nonce);
+                        c.consume(b":");
+                        if let Some(nc) = digest_map.get(b"nc".as_ref()) {
+                            c.consume(nc);
                         }
-                    }
-                    let correct_response = match correct_response {
-                        Some(r) => r,
-                        None => {
-                            let mut c = Context::new();
-                            c.consume(&auth_pass);
-                            c.consume(b":");
-                            c.consume(nonce);
-                            c.consume(b":");
-                            c.consume(&*ha);
-                            format!("{:x}", c.compute())
+                        c.consume(b":");
+                        if let Some(cnonce) = digest_map.get(b"cnonce".as_ref()) {
+                            c.consume(cnonce);
                         }
-                    };
-                    if correct_response.as_bytes() == *user_response {
-                        return Some(());
-                    }
+                        c.consume(b":");
+                        c.consume(qop);
+                        c.consume(b":");
+                        c.consume(&*ha);
+                        format!("{:x}", c.compute())
+                    });
                 }
-                None
+            }
+            let correct_response = match correct_response {
+                Some(r) => r,
+                None => {
+                    let mut c = Context::new();
+                    c.consume(&auth_pass);
+                    c.consume(b":");
+                    c.consume(nonce);
+                    c.consume(b":");
+                    c.consume(&*ha);
+                    format!("{:x}", c.compute())
+                }
+            };
+            if correct_response.as_bytes() == *user_response {
+                return Some(());
             }
         }
+        None
+    } else {
+        None
     }
 }
 
@@ -413,6 +408,13 @@ fn validate_nonce(nonce: &[u8]) -> Result<bool> {
         }
     }
     bail!("invalid nonce");
+}
+
+fn is_readonly_method(method: &Method) -> bool {
+    method == Method::GET
+        || method == Method::OPTIONS
+        || method == Method::HEAD
+        || method.as_str() == "PROPFIND"
 }
 
 fn strip_prefix<'a>(search: &'a [u8], prefix: &[u8]) -> Option<&'a [u8]> {
@@ -478,9 +480,74 @@ fn create_nonce() -> Result<String> {
     Ok(n[..34].to_string())
 }
 
+fn split_account_paths(s: &str) -> Option<(&str, &str)> {
+    let i = s.find("@/")?;
+    Some((&s[0..i], &s[i + 1..]))
+}
+
+/// Compatible with deprecated usage of `|` for role separation
+fn compact_split_rules(rules: &[&str]) -> Vec<String> {
+    let mut output = vec![];
+    for rule in rules {
+        let parts: Vec<&str> = rule.split('|').collect();
+        let mut rules_list = vec![];
+        let mut concated_part = String::new();
+        for (i, part) in parts.iter().enumerate() {
+            if part.contains("@/") {
+                concated_part.push_str(part);
+                let mut concated_part_tmp = String::new();
+                std::mem::swap(&mut concated_part_tmp, &mut concated_part);
+                rules_list.push(concated_part_tmp);
+                continue;
+            }
+            concated_part.push_str(part);
+            if i < parts.len() - 1 {
+                concated_part.push('|');
+            }
+        }
+        if !concated_part.is_empty() {
+            rules_list.push(concated_part)
+        }
+        output.extend(rules_list);
+    }
+    output
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_split_account_paths() {
+        assert_eq!(
+            split_account_paths("user:pass@/:rw"),
+            Some(("user:pass", "/:rw"))
+        );
+        assert_eq!(
+            split_account_paths("user:pass@@/:rw"),
+            Some(("user:pass@", "/:rw"))
+        );
+        assert_eq!(
+            split_account_paths("user:pass@1@/:rw"),
+            Some(("user:pass@1", "/:rw"))
+        );
+    }
+
+    #[test]
+    fn test_compact_split_rules() {
+        assert_eq!(
+            compact_split_rules(&["user1:pass1@/:rw|user2:pass2@/:rw"]),
+            ["user1:pass1@/:rw", "user2:pass2@/:rw"]
+        );
+        assert_eq!(
+            compact_split_rules(&["user1:pa|ss1@/:rw|user2:pa|ss2@/:rw"]),
+            ["user1:pa|ss1@/:rw", "user2:pa|ss2@/:rw"]
+        );
+        assert_eq!(
+            compact_split_rules(&["user1:pa|ss1@/:rw|@/"]),
+            ["user1:pa|ss1@/:rw", "@/"]
+        );
+    }
 
     #[test]
     fn test_access_paths() {

@@ -48,12 +48,13 @@ Download from [Github Releases](https://github.com/sigoden/dufs/releases), unzip
 ```
 Dufs is a distinctive utility file server - https://github.com/sigoden/dufs
 
-Usage: dufs [OPTIONS] [serve_path]
+Usage: dufs [OPTIONS] [serve-path]
 
 Arguments:
-  [serve_path]  Specific path to serve [default: .]
+  [serve-path]  Specific path to serve [default: .]
 
 Options:
+  -c, --config <config>      Specify configuration file
   -b, --bind <addrs>         Specify bind address or unix socket
   -p, --port <port>          Specify port to listen on [default: 5000]
       --path-prefix <path>   Specify a path prefix
@@ -61,7 +62,6 @@ Options:
       --posix-hidden         Don't show or zip files/folders whose names begin with a "."
       --dir-size             Show sizes of folders in directory listing (synchronous; needs fast disk; doesn't consider auth during recursion)
   -a, --auth <rules>         Add auth role
-      --auth-method <value>  Select auth method [default: digest] [possible values: basic, digest]
   -A, --allow-all            Allow all operations
       --allow-upload         Allow upload files/folders
       --allow-delete         Allow delete files/folders
@@ -73,17 +73,17 @@ Options:
       --render-try-index     Serve index.html when requesting a directory, returns directory listing if not found index.html
       --render-spa           Serve SPA(Single Page Application) from `./index.html`
       --assets <path>        Use custom assets to override builtin assets
-      --tls-cert <path>      Path to an SSL/TLS certificate to serve with HTTPS
-      --tls-key <path>       Path to the SSL/TLS certificate's private key
       --log-format <format>  Customize http log format
       --completions <shell>  Print shell completion script for <shell> [possible values: bash, elvish, fish, powershell, zsh]
+      --tls-cert <path>      Path to an SSL/TLS certificate to serve with HTTPS
+      --tls-key <path>       Path to the SSL/TLS certificate's private key
   -h, --help                 Print help
   -V, --version              Print version
 ```
 
 ## Examples
 
-Serve current working directory in readonly mode
+Serve current working directory in read-only mode
 
 ```
 dufs
@@ -190,16 +190,16 @@ curl -X MOVE https://127.0.0.1:5000/path -H "Destination: https://127.0.0.1:5000
 List/search directory contents
 
 ```
-curl http://127.0.0.1:5000?simple                 # output names only, just like `ls -1`
+curl http://127.0.0.1:5000?q=Dockerfile           # search for files, similar to `find -name Dockerfile`
+curl http://127.0.0.1:5000?simple                 # output names only, similar to `ls -1`
 curl http://127.0.0.1:5000?json                   # output paths in json format
-curl http://127.0.0.1:5000?q=Dockerfile&simple    # search for files, just like `find -name Dockerfile`
 ```
 
 With authorization
 
 ```
-curl --user user:pass --digest http://192.168.8.10:5000/file  # digest auth
-curl --user user:pass http://192.168.8.10:5000/file           # basic auth
+curl http://192.168.8.10:5000/file --user user:pass                 # basic auth
+curl http://192.168.8.10:5000/file --user user:pass --digest        # digest auth
 ```
 
 <details>
@@ -210,51 +210,42 @@ curl --user user:pass http://192.168.8.10:5000/file           # basic auth
 Dufs supports account based access control. You can control who can do what on which path with `--auth`/`-a`.
 
 ```
-dufs -a [user:pass]@path[:rw][,path[:rw]...][|...]
+dufs -a user:pass@/path1:rw,/path2 -a user2:pass2@/path3 -a @/path4
 ```
 
-1: Multiple rules are separated by "|"
-2: User and pass are the account name and password, if omitted, it is an anonymous user
-3: One rule can set multiple paths, separated by ","
-4: Add `:rw` after the path to indicate that the path has read and write permissions, otherwise the path has readonly permissions.
+1. Use `@` to separate the account and paths. No account means anonymous user.
+2. Use `:` to separate the username and password of the account.
+3. Use `,` to separate paths.
+4. Use `:rw` suffix to indicate that the account has read-write permission on the path.
+
+- `-a admin:amdin@/:rw`: `admin` has complete permissions for all paths.
+- `-a guest:guest@/`: `guest` has read-only permissions for all paths.
+- `-a user:pass@/dir1:rw,/dir2`: `user` has complete permissions for `/dir1/*`, has read-only permissions for `/dir2/`.
+- `-a @/`: All paths is publicly accessible, everyone can view/download it.
+
+> There are no restrictions on using ':' and '@' characters in a password, `user:pa:ss@1@/:rw` is valid, and the password is `pa:ss@1`.
+
+#### Hashed Password
+
+DUFS supports the use of sha-512 hashed password.
+
+Create hashed password
 
 ```
-dufs -A -a admin:admin@/:rw
+$ mkpasswd  -m sha-512 -s
+Password: 123456 
+$6$qCAVUG7yn7t/hH4d$BWm8r5MoDywNmDP/J3V2S2a6flmKHC1IpblfoqZfuK.LtLBZ0KFXP9QIfJP8RqL8MCw4isdheoAMTuwOz.pAO/
 ```
 
-`admin` has all permissions for all paths.
-
+Use hashed password
 ```
-dufs -A -a admin:admin@/:rw -a guest:guest@/
-```
-
-`guest` has readonly permissions for all paths.
-
-```
-dufs -A -a admin:admin@/:rw -a @/
+dufs -a 'admin:$6$qCAVUG7yn7t/hH4d$BWm8r5MoDywNmDP/J3V2S2a6flmKHC1IpblfoqZfuK.LtLBZ0KFXP9QIfJP8RqL8MCw4isdheoAMTuwOz.pAO/@/:rw'
 ```
 
-All paths is public, everyone can view/download it.
+Two important things for hashed passwords:
 
-```
-dufs -A -a admin:admin@/:rw -a user1:pass1@/user1:rw -a user2:pass2@/user2
-dufs -A -a "admin:admin@/:rw|user1:pass1@/user1:rw|user2:pass2@/user2"
-```
-
-`user1` has all permissions for `/user1/*` path.
-`user2` has all permissions for `/user2/*` path.
-
-```
-dufs -A -a user:pass@/dir1:rw,/dir2:rw,dir3
-```
-
-`user` has all permissions for `/dir1/*` and `/dir2/*`, has readonly permissions for `/dir3/`.
-
-```
-dufs -a admin:admin@/
-```
-
-Since dufs only allows viewing/downloading, `admin` can only view/download files.
+1. Dufs only supports sha-512 hashed passwords, so ensure that the password string always starts with `$6$`.
+2. Digest authentication does not function properly with hashed passwords.
 
 ### Hide Paths
 
@@ -267,9 +258,10 @@ dufs --hidden .git,.DS_Store,tmp
 > The glob used in --hidden only matches file and directory names, not paths. So `--hidden dir1/file` is invalid.
 
 ```sh
-dufs --hidden '.*'            # hidden dotfiles
-dufs --hidden '*/'            # hidden all folders
-dufs --hidden '*.log,*.lock'  # hidden by exts
+dufs --hidden '.*'                          # hidden dotfiles
+dufs --hidden '*/'                          # hidden all folders
+dufs --hidden '*.log,*.lock'                # hidden by exts
+dufs --hidden '*.log' --hidden '*.lock'
 ```
 
 ### Log Format
@@ -323,29 +315,63 @@ dufs --log-format '$remote_addr $remote_user "$request" $status' -a /@admin:admi
 All options can be set using environment variables prefixed with `DUFS_`.
 
 ```
-  [ROOT_DIR]                  DUFS_ROOT_DIR=/dir
-  -b, --bind <addrs>          DUFS_BIND=0.0.0.0
-  -p, --port <port>           DUFS_PORT=5000
-      --path-prefix <path>    DUFS_PATH_RREFIX=/path
-      --hidden <value>        DUFS_HIDDEN=*.log
-      --posix-hidden          DUFS_POSIX_HIDDEN=true
-      --dir-size              DUFS_DIR_SIZE=true
-  -a, --auth <rules>          DUFS_AUTH="admin:admin@/:rw|@/"
-      --auth-method <value>   DUFS_AUTH_METHOD=basic
-  -A, --allow-all             DUFS_ALLOW_ALL=true
-      --allow-upload          DUFS_ALLOW_UPLOAD=true
-      --allow-delete          DUFS_ALLOW_DELETE=true
-      --allow-search          DUFS_ALLOW_SEARCH=true
-      --allow-symlink         DUFS_ALLOW_SYMLINK=true
-      --allow-archive         DUFS_ALLOW_ARCHIVE=true
-      --enable-cors           DUFS_ENABLE_CORS=true
-      --render-index          DUFS_RENDER_INDEX=true
-      --render-try-index      DUFS_RENDER_TRY_INDEX=true
-      --render-spa            DUFS_RENDER_SPA=true
-      --assets <path>         DUFS_ASSETS=/assets
-      --tls-cert <path>       DUFS_TLS_CERT=cert.pem
-      --tls-key <path>        DUFS_TLS_KEY=key.pem
-      --log-format <format>   DUFS_LOG_FORMAT=""
+[serve-path]                DUFS_SERVE_PATH="."
+    --config <path>         DUFS_CONFIG=config.yaml
+-b, --bind <addrs>          DUFS_BIND=0.0.0.0
+-p, --port <port>           DUFS_PORT=5000
+    --path-prefix <path>    DUFS_PATH_PREFIX=/static
+    --hidden <value>        DUFS_HIDDEN=tmp,*.log,*.lock
+    --posix-hidden          DUFS_POSIX_HIDDEN=true
+    --dir-size              DUFS_DIR_SIZE=true
+-a, --auth <rules>          DUFS_AUTH="admin:admin@/:rw|@/" 
+-A, --allow-all             DUFS_ALLOW_ALL=true
+    --allow-upload          DUFS_ALLOW_UPLOAD=true
+    --allow-delete          DUFS_ALLOW_DELETE=true
+    --allow-search          DUFS_ALLOW_SEARCH=true
+    --allow-symlink         DUFS_ALLOW_SYMLINK=true
+    --allow-archive         DUFS_ALLOW_ARCHIVE=true
+    --enable-cors           DUFS_ENABLE_CORS=true
+    --render-index          DUFS_RENDER_INDEX=true
+    --render-try-index      DUFS_RENDER_TRY_INDEX=true
+    --render-spa            DUFS_RENDER_SPA=true
+    --assets <path>         DUFS_ASSETS=/assets
+    --log-format <format>   DUFS_LOG_FORMAT=""
+    --tls-cert <path>       DUFS_TLS_CERT=cert.pem
+    --tls-key <path>        DUFS_TLS_KEY=key.pem
+```
+
+## Configuration File
+
+You can specify and use the configuration file by selecting the option `--config <path-to-config.yaml>`.
+
+The following are the configuration items:
+
+```yaml
+serve-path: '.'
+bind: 0.0.0.0
+port: 5000
+path-prefix: /dufs
+hidden:
+  - tmp
+  - '*.log'
+  - '*.lock'
+auth:
+  - admin:admin@/:rw
+  - user:pass@/src:rw,/share
+allow-all: false
+allow-upload: true
+allow-delete: true
+allow-search: true
+allow-symlink: true
+allow-archive: true
+enable-cors: true
+render-index: true
+render-try-index: true
+render-spa: true
+assets: ./assets/
+log-format: '$remote_addr "$request" $status $http_user_agent'
+tls-cert: tests/data/cert.pem
+tls-key: tests/data/key_pkcs1.pem
 ```
 
 ### Customize UI

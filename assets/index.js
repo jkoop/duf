@@ -10,7 +10,7 @@
  * @typedef {object} DATA
  * @property {string} href
  * @property {string} uri_prefix
- * @property {"Index" | "Edit"} kind
+ * @property {"Index" | "Edit" | "View"} kind
  * @property {PathItem[]} paths
  * @property {boolean} allow_upload
  * @property {boolean} allow_delete
@@ -55,7 +55,8 @@ const ICONS = {
   download: `<svg width="16" height="16" viewBox="0 0 16 16"><path d="M.5 9.9a.5.5 0 0 1 .5.5v2.5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-2.5a.5.5 0 0 1 1 0v2.5a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2v-2.5a.5.5 0 0 1 .5-.5z"/><path d="M7.646 11.854a.5.5 0 0 0 .708 0l3-3a.5.5 0 0 0-.708-.708L8.5 10.293V1.5a.5.5 0 0 0-1 0v8.793L5.354 8.146a.5.5 0 1 0-.708.708l3 3z"/></svg>`,
   move: `<svg width="16" height="16" viewBox="0 0 16 16"><path fill-rule="evenodd" d="M1.5 1.5A.5.5 0 0 0 1 2v4.8a2.5 2.5 0 0 0 2.5 2.5h9.793l-3.347 3.346a.5.5 0 0 0 .708.708l4.2-4.2a.5.5 0 0 0 0-.708l-4-4a.5.5 0 0 0-.708.708L13.293 8.3H3.5A1.5 1.5 0 0 1 2 6.8V2a.5.5 0 0 0-.5-.5z"/></svg>`,
   edit: `<svg width="16" height="16" viewBox="0 0 16 16"><path d="M12.146.146a.5.5 0 0 1 .708 0l3 3a.5.5 0 0 1 0 .708l-10 10a.5.5 0 0 1-.168.11l-5 2a.5.5 0 0 1-.65-.65l2-5a.5.5 0 0 1 .11-.168l10-10zM11.207 2.5 13.5 4.793 14.793 3.5 12.5 1.207 11.207 2.5zm1.586 3L10.5 3.207 4 9.707V10h.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.5h.293l6.5-6.5zm-9.761 5.175-.106.106-1.528 3.821 3.821-1.528.106-.106A.5.5 0 0 1 5 12.5V12h-.5a.5.5 0 0 1-.5-.5V11h-.5a.5.5 0 0 1-.468-.325z"/></svg>`,
-  delete: `<svg width="16" height="16" fill="currentColor"viewBox="0 0 16 16"><path d="M6.854 7.146a.5.5 0 1 0-.708.708L7.293 9l-1.147 1.146a.5.5 0 0 0 .708.708L8 9.707l1.146 1.147a.5.5 0 0 0 .708-.708L8.707 9l1.147-1.146a.5.5 0 0 0-.708-.708L8 8.293 6.854 7.146z"/><path d="M14 14V4.5L9.5 0H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2zM9.5 3A1.5 1.5 0 0 0 11 4.5h2V14a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1h5.5v2z"/></svg>`,
+  delete: `<svg width="16" height="16" viewBox="0 0 16 16"><path d="M6.854 7.146a.5.5 0 1 0-.708.708L7.293 9l-1.147 1.146a.5.5 0 0 0 .708.708L8 9.707l1.146 1.147a.5.5 0 0 0 .708-.708L8.707 9l1.147-1.146a.5.5 0 0 0-.708-.708L8 8.293 6.854 7.146z"/><path d="M14 14V4.5L9.5 0H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2zM9.5 3A1.5 1.5 0 0 0 11 4.5h2V14a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1h5.5v2z"/></svg>`,
+  view: `<svg width="16" height="16" viewBox="0 0 16 16"><path d="M4 0a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V2a2 2 0 0 0-2-2zm0 1h8a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1"/></svg>`,
 }
 
 /**
@@ -86,6 +87,10 @@ let $editor;
  * @type Element
  */
 let $userBtn;
+/**
+ * @type Element
+ */
+let $userName;
 
 function ready() {
   $pathsTable = document.querySelector(".paths-table")
@@ -95,6 +100,7 @@ function ready() {
   $emptyFolder = document.querySelector(".empty-folder");
   $editor = document.querySelector(".editor");
   $userBtn = document.querySelector(".user-btn");
+  $userName = document.querySelector(".user-name");
 
   addBreadcrumb(DATA.href, DATA.uri_prefix);
 
@@ -108,7 +114,12 @@ function ready() {
     document.title = `Edit ${DATA.href} - Dufs`;
     document.querySelector(".editor-page").classList.remove("hidden");;
 
-    setupEditPage();
+    setupEditorPage();
+  } else if (DATA.kind == "View") {
+    document.title = `View ${DATA.href} - Dufs`;
+    document.querySelector(".editor-page").classList.remove("hidden");;
+
+    setupEditorPage();
   }
 }
 
@@ -176,11 +187,12 @@ class Uploader {
 
   progress(event) {
     const now = Date.now();
-    const speed = (event.loaded - this.uploaded) / Math.max((now - this.lastUptime) * 1000, 1);
+    const speed = (event.loaded - this.uploaded) / (now - this.lastUptime) * 1000;
+    const [speedValue, speedUnit] = formatSize(speed);
+    const speedText = `${speedValue} ${speedUnit}/s`;
     const progress = formatPercent((event.loaded / event.total) * 100);
     const duration = formatDuration((event.total - event.loaded) / speed)
-    const speedHTML = getSizeHTML(speed) + "/s";
-    this.$uploadStatus.innerHTML = `<span>${speedHTML}</span><span>${progress}</span><span>${duration}</span>`;
+    this.$uploadStatus.innerHTML = `<span>${speedText}</span><span>${progress} ${duration}</span>`;
     this.uploaded = event.loaded;
     this.lastUptime = now;
   }
@@ -251,7 +263,7 @@ function addBreadcrumb(href, uri_prefix) {
     }
     const encodedName = encodedStr(name);
     if (i === 0) {
-      $breadcrumb.insertAdjacentHTML("beforeend", `<a href="${path}"><svg width="16" height="16" viewBox="0 0 16 16"><path d="M6.5 14.5v-3.505c0-.245.25-.495.5-.495h2c.25 0 .5.25.5.5v3.5a.5.5 0 0 0 .5.5h4a.5.5 0 0 0 .5-.5v-7a.5.5 0 0 0-.146-.354L13 5.793V2.5a.5.5 0 0 0-.5-.5h-1a.5.5 0 0 0-.5.5v1.293L8.354 1.146a.5.5 0 0 0-.708 0l-6 6A.5.5 0 0 0 1.5 7.5v7a.5.5 0 0 0 .5.5h4a.5.5 0 0 0 .5-.5z"/></svg></a>`);
+      $breadcrumb.insertAdjacentHTML("beforeend", `<a href="${path}" title="Root"><svg width="16" height="16" viewBox="0 0 16 16"><path d="M6.5 14.5v-3.505c0-.245.25-.495.5-.495h2c.25 0 .5.25.5.5v3.5a.5.5 0 0 0 .5.5h4a.5.5 0 0 0 .5-.5v-7a.5.5 0 0 0-.146-.354L13 5.793V2.5a.5.5 0 0 0-.5-.5h-1a.5.5 0 0 0-.5.5v1.293L8.354 1.146a.5.5 0 0 0-.708 0l-6 6A.5.5 0 0 0 1.5 7.5v7a.5.5 0 0 0 .5.5h4a.5.5 0 0 0 .5-.5z"/></svg></a>`);
     } else if (i === len - 1) {
       $breadcrumb.insertAdjacentHTML("beforeend", `<b>${encodedName}</b>`);
     } else {
@@ -315,13 +327,13 @@ function renderPathsTableHead() {
     <tr>
       ${headerItems.map(item => {
     let svg = `<svg width="12" height="12" viewBox="0 0 16 16"><path fill-rule="evenodd" d="M11.5 15a.5.5 0 0 0 .5-.5V2.707l3.146 3.147a.5.5 0 0 0 .708-.708l-4-4a.5.5 0 0 0-.708 0l-4 4a.5.5 0 1 0 .708.708L11 2.707V14.5a.5.5 0 0 0 .5.5zm-7-14a.5.5 0 0 1 .5.5v11.793l3.146-3.147a.5.5 0 0 1 .708.708l-4 4a.5.5 0 0 1-.708 0l-4-4a.5.5 0 0 1 .708-.708L4 13.293V1.5a.5.5 0 0 1 .5-.5z"/></svg>`;
-    let order = "asc";
+    let order = "desc";
     if (PARAMS.sort === item.name) {
-      if (PARAMS.order === "asc") {
-        order = "desc";
-        svg = `<svg width="12" height="12" viewBox="0 0 16 16"><path fill-rule="evenodd" d="M8 15a.5.5 0 0 0 .5-.5V2.707l3.146 3.147a.5.5 0 0 0 .708-.708l-4-4a.5.5 0 0 0-.708 0l-4 4a.5.5 0 1 0 .708.708L7.5 2.707V14.5a.5.5 0 0 0 .5.5z"/></svg>`
-      } else {
+      if (PARAMS.order === "desc") {
+        order = "asc";
         svg = `<svg width="12" height="12" viewBox="0 0 16 16"><path fill-rule="evenodd" d="M8 1a.5.5 0 0 1 .5.5v11.793l3.146-3.147a.5.5 0 0 1 .708.708l-4 4a.5.5 0 0 1-.708 0l-4-4a.5.5 0 0 1 .708-.708L7.5 13.293V1.5A.5.5 0 0 1 8 1z"/></svg>`
+      } else {
+        svg = `<svg width="12" height="12" viewBox="0 0 16 16"><path fill-rule="evenodd" d="M8 15a.5.5 0 0 0 .5-.5V2.707l3.146 3.147a.5.5 0 0 0 .708-.708l-4-4a.5.5 0 0 0-.708 0l-4 4a.5.5 0 1 0 .708.708L7.5 2.707V14.5a.5.5 0 0 0 .5.5z"/></svg>`
       }
     }
     const qs = new URLSearchParams({ ...PARAMS, order, sort: item.name }).toString();
@@ -363,6 +375,7 @@ function addPath(file, index) {
   let actionDownload = "";
   let actionMove = "";
   let actionEdit = "";
+  let actionView = "";
   let isDir = file.path_type.endsWith("Dir");
   if (isDir) {
     url += "/";
@@ -388,9 +401,13 @@ function addPath(file, index) {
     actionDelete = `
     <div onclick="deletePath(${index})" class="action-btn" id="deleteBtn${index}" title="Delete">${ICONS.delete}</div>`;
   }
+  if (!actionEdit && !isDir) {
+    actionView = `<a class="action-btn" title="View file" target="_blank" href="${url}?view">${ICONS.view}</a>`;
+  }
   let actionCell = `
   <td class="cell-actions">
     ${actionDownload}
+    ${actionView}
     ${actionMove}
     ${actionDelete}
     ${actionEdit}
@@ -437,7 +454,7 @@ function setupDropzone() {
 function setupAuth() {
   if (DATA.user) {
     $userBtn.classList.remove("hidden");
-    $userBtn.title = DATA.user;
+    $userName.textContent = DATA.user;
   } else {
     const $loginBtn = document.querySelector(".login-btn");
     $loginBtn.classList.remove("hidden");
@@ -498,32 +515,40 @@ function setupNewFile() {
   });
 }
 
-async function setupEditPage() {
+async function setupEditorPage() {
   const url = baseUrl();
 
   const $download = document.querySelector(".download");
   $download.classList.remove("hidden");
   $download.href = url;
 
-  const $moveFile = document.querySelector(".move-file");
-  $moveFile.classList.remove("hidden");
-  $moveFile.addEventListener("click", async () => {
-    const query = location.href.slice(url.length);
-    const newFileUrl = await doMovePath(url);
-    if (newFileUrl) {
-      location.href = newFileUrl + query;
-    }
-  });
-
-  const $deleteFile = document.querySelector(".delete-file");
-  $deleteFile.classList.remove("hidden");
-  $deleteFile.addEventListener("click", async () => {
-    const url = baseUrl();
-    const name = baseName(url);
-    await doDeletePath(name, url, () => {
-      location.href = location.href.split("/").slice(0, -1).join("/");
+  if (DATA.kind == "Edit") {
+    const $moveFile = document.querySelector(".move-file");
+    $moveFile.classList.remove("hidden");
+    $moveFile.addEventListener("click", async () => {
+      const query = location.href.slice(url.length);
+      const newFileUrl = await doMovePath(url);
+      if (newFileUrl) {
+        location.href = newFileUrl + query;
+      }
     });
-  })
+
+    const $deleteFile = document.querySelector(".delete-file");
+    $deleteFile.classList.remove("hidden");
+    $deleteFile.addEventListener("click", async () => {
+      const url = baseUrl();
+      const name = baseName(url);
+      await doDeletePath(name, url, () => {
+        location.href = location.href.split("/").slice(0, -1).join("/");
+      });
+    })
+
+    const $saveBtn = document.querySelector(".save-btn");
+    $saveBtn.classList.remove("hidden");
+    $saveBtn.addEventListener("click", saveChange);
+  } else if (DATA.kind == "View") {
+    $editor.readonly = true;
+  }
 
   if (!DATA.editable) {
     const $notEditable = document.querySelector(".not-editable");
@@ -537,10 +562,6 @@ async function setupEditPage() {
     }
     return;
   }
-
-  const $saveBtn = document.querySelector(".save-btn");
-  $saveBtn.classList.remove("hidden");
-  $saveBtn.addEventListener("click", saveChange);
 
   $editor.classList.remove("hidden");
   try {
@@ -668,7 +689,7 @@ async function checkAuth() {
   await assertResOK(res);
   document.querySelector(".login-btn").classList.add("hidden");
   $userBtn.classList.remove("hidden");
-  $userBtn.title = "";
+  $userName.textContent = "";
 }
 
 /**
@@ -786,10 +807,13 @@ function formatSize(size) {
 
 function getSizeHTML(size) {
   const formattedSize = formatSize(size);
+  console.log(formattedSize)
   if (("" + formattedSize.major).length < 3 && formattedSize.unit != 'B') {
     return `${formattedSize.major}<span class="size-minor-part">.${("" + formattedSize.minor + ".0").substring(2, 5 - ("" + formattedSize.major).length)}</span> ${formattedSize.unit}`;
-  } else {
+  } else if (formattedSize.major != undefined) {
     return `${formattedSize.major} ${formattedSize.unit}`;
+  } else {
+    return '';
   }
 }
 

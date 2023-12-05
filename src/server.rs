@@ -1,6 +1,6 @@
 #![allow(clippy::too_many_arguments)]
 
-use crate::auth::{AccessPaths, AccessPerm};
+use crate::auth::{www_authenticate, AccessPaths, AccessPerm};
 use crate::streamer::Streamer;
 use crate::utils::{
     decode_uri, encode_uri, get_file_mtime_and_mode, get_file_name, glob, try_get_file_name,
@@ -16,9 +16,9 @@ use chrono::{LocalResult, TimeZone, Utc};
 use fs_extra::dir::get_size;
 use futures::TryStreamExt;
 use headers::{
-    AcceptRanges, AccessControlAllowCredentials, AccessControlAllowOrigin, ContentLength,
-    ContentType, ETag, HeaderMap, HeaderMapExt, IfModifiedSince, IfNoneMatch, IfRange,
-    LastModified, Range,
+    AcceptRanges, AccessControlAllowCredentials, AccessControlAllowOrigin, CacheControl,
+    ContentLength, ContentType, ETag, HeaderMap, HeaderMapExt, IfModifiedSince, IfNoneMatch,
+    IfRange, LastModified, Range,
 };
 use hyper::header::{
     HeaderValue, AUTHORIZATION, CONTENT_DISPOSITION, CONTENT_LENGTH, CONTENT_RANGE, CONTENT_TYPE,
@@ -27,12 +27,13 @@ use hyper::header::{
 use hyper::{Body, Method, StatusCode, Uri};
 use serde::Serialize;
 use std::borrow::Cow;
+use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::fs::Metadata;
 use std::io::SeekFrom;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{self, AtomicBool};
 use std::sync::Arc;
 use std::time::SystemTime;
 use tokio::fs::File;
@@ -71,13 +72,13 @@ impl Server {
                 encode_uri(&format!(
                     "{}{}",
                     &args.uri_prefix,
-                    get_file_name(&args.path)
+                    get_file_name(&args.serve_path)
                 )),
             ]
         } else {
             vec![]
         };
-        let html = match args.assets_path.as_ref() {
+        let html = match args.assets.as_ref() {
             Some(path) => Cow::Owned(std::fs::read_to_string(path.join("index.html"))?),
             None => Cow::Borrowed(INDEX_HTML),
         };
@@ -96,9 +97,9 @@ impl Server {
         addr: Option<SocketAddr>,
     ) -> Result<Response, hyper::Error> {
         let uri = req.uri().clone();
-        let assets_prefix = self.assets_prefix.clone();
+        let assets_prefix = &self.assets_prefix;
         let enable_cors = self.args.enable_cors;
-        let mut http_log_data = self.args.log_http.data(&req, &self.args);
+        let mut http_log_data = self.args.http_logger.data(&req);
         if let Some(addr) = addr {
             http_log_data.insert("remote_addr".to_string(), addr.ip().to_string());
         }
@@ -106,8 +107,8 @@ impl Server {
         let mut res = match self.clone().handle(req).await {
             Ok(res) => {
                 http_log_data.insert("status".to_string(), res.status().as_u16().to_string());
-                if !uri.path().starts_with(&assets_prefix) {
-                    self.args.log_http.log(&http_log_data, None);
+                if !uri.path().starts_with(assets_prefix) {
+                    self.args.http_logger.log(&http_log_data, None);
                 }
                 res
             }
@@ -117,7 +118,7 @@ impl Server {
                 *res.status_mut() = status;
                 http_log_data.insert("status".to_string(), status.as_u16().to_string());
                 self.args
-                    .log_http
+                    .http_logger
                     .log(&http_log_data, Some(err.to_string()));
                 res
             }
@@ -149,12 +150,7 @@ impl Server {
             }
         };
 
-        let guard = self.args.auth.guard(
-            &relative_path,
-            &method,
-            authorization,
-            self.args.auth_method.clone(),
-        );
+        let guard = self.args.auth.guard(&relative_path, &method, authorization);
 
         let (user, access_paths) = match guard {
             (None, None) => {
@@ -185,7 +181,7 @@ impl Server {
                 .iter()
                 .any(|v| v.as_str() == req_path)
             {
-                self.handle_send_file(&self.args.path, headers, head_only, &mut res)
+                self.handle_send_file(&self.args.serve_path, headers, head_only, &mut res)
                     .await?;
             } else {
                 status_not_found(&mut res);
@@ -295,7 +291,10 @@ impl Server {
                     }
                 } else if is_file {
                     if query_params.contains_key("edit") {
-                        self.handle_edit_file(path, head_only, user, &mut res)
+                        self.handle_deal_file(path, DataKind::Edit, head_only, user, &mut res)
+                            .await?;
+                    } else if query_params.contains_key("view") {
+                        self.handle_deal_file(path, DataKind::View, head_only, user, &mut res)
                             .await?;
                     } else {
                         self.handle_send_file(path, headers, head_only, &mut res)
@@ -432,7 +431,12 @@ impl Server {
 
         futures::pin_mut!(body_reader);
 
-        io::copy(&mut body_reader, &mut file).await?;
+        let ret = io::copy(&mut body_reader, &mut file).await;
+        if ret.is_err() {
+            tokio::fs::remove_file(&path).await?;
+
+            ret?;
+        }
 
         *res.status_mut() = StatusCode::CREATED;
         Ok(())
@@ -460,7 +464,7 @@ impl Server {
     ) -> Result<()> {
         let mut paths = vec![];
         if exist {
-            paths = match self.list_dir(path, path, access_paths).await {
+            paths = match self.list_dir(path, path, access_paths.clone()).await {
                 Ok(paths) => paths,
                 Err(_) => {
                     status_forbid(res);
@@ -468,7 +472,16 @@ impl Server {
                 }
             }
         };
-        self.send_index(path, paths, exist, query_params, head_only, user, res)
+        self.send_index(
+            path,
+            paths,
+            exist,
+            query_params,
+            head_only,
+            user,
+            access_paths,
+            res,
+        )
     }
 
     async fn handle_search_dir(
@@ -491,13 +504,14 @@ impl Server {
             let hidden = hidden.clone();
             let posix_hidden = self.args.posix_hidden;
             let running = self.running.clone();
+            let access_paths = access_paths.clone();
             let search_paths = tokio::task::spawn_blocking(move || {
                 let mut paths: Vec<PathBuf> = vec![];
                 for dir in access_paths.leaf_paths(&path_buf) {
                     let mut it = WalkDir::new(&dir).into_iter();
                     it.next();
                     while let Some(Ok(entry)) = it.next() {
-                        if !running.load(Ordering::SeqCst) {
+                        if !running.load(atomic::Ordering::SeqCst) {
                             break;
                         }
                         let entry_path = entry.path();
@@ -535,7 +549,16 @@ impl Server {
                 }
             }
         }
-        self.send_index(path, paths, true, query_params, head_only, user, res)
+        self.send_index(
+            path,
+            paths,
+            true,
+            query_params,
+            head_only,
+            user,
+            access_paths,
+            res,
+        )
     }
 
     async fn handle_zip_dir(
@@ -612,7 +635,7 @@ impl Server {
         res: &mut Response,
     ) -> Result<()> {
         if path.extension().is_none() {
-            let path = self.args.path.join(INDEX_NAME);
+            let path = self.args.serve_path.join(INDEX_NAME);
             self.handle_send_file(&path, headers, head_only, res)
                 .await?;
         } else {
@@ -628,7 +651,7 @@ impl Server {
         res: &mut Response,
     ) -> Result<bool> {
         if let Some(name) = req_path.strip_prefix(&self.assets_prefix) {
-            match self.args.assets_path.as_ref() {
+            match self.args.assets.as_ref() {
                 Some(assets_path) => {
                     let path = assets_path.join(name);
                     self.handle_send_file(&path, headers, false, res).await?;
@@ -638,13 +661,15 @@ impl Server {
                         *res.body_mut() = Body::from(INDEX_JS);
                         res.headers_mut().insert(
                             "content-type",
-                            HeaderValue::from_static("application/javascript"),
+                            HeaderValue::from_static("application/javascript; charset=UTF-8"),
                         );
                     }
                     "index.css" => {
                         *res.body_mut() = Body::from(INDEX_CSS);
-                        res.headers_mut()
-                            .insert("content-type", HeaderValue::from_static("text/css"));
+                        res.headers_mut().insert(
+                            "content-type",
+                            HeaderValue::from_static("text/css; charset=UTF-8"),
+                        );
                     }
                     "favicon.ico" => {
                         *res.body_mut() = Body::from(FAVICON_ICO);
@@ -658,7 +683,11 @@ impl Server {
             }
             res.headers_mut().insert(
                 "cache-control",
-                HeaderValue::from_static("max-age=2592000, public"),
+                HeaderValue::from_static("public, max-age=31536000, immutable"),
+            );
+            res.headers_mut().insert(
+                "x-content-type-options",
+                HeaderValue::from_static("nosniff"),
             );
             Ok(true)
         } else {
@@ -759,22 +788,26 @@ impl Server {
         Ok(())
     }
 
-    async fn handle_edit_file(
+    async fn handle_deal_file(
         &self,
         path: &Path,
+        kind: DataKind,
         head_only: bool,
         user: Option<String>,
         res: &mut Response,
     ) -> Result<()> {
         let (file, meta) = tokio::join!(fs::File::open(path), fs::metadata(path),);
         let (file, meta) = (file?, meta?);
-        let href = format!("/{}", normalize_path(path.strip_prefix(&self.args.path)?));
+        let href = format!(
+            "/{}",
+            normalize_path(path.strip_prefix(&self.args.serve_path)?)
+        );
         let mut buffer: Vec<u8> = vec![];
         file.take(1024).read_to_end(&mut buffer).await?;
         let editable = meta.len() <= TEXT_MAX_SIZE && content_inspector::inspect(&buffer).is_text();
         let data = EditData {
             href,
-            kind: DataKind::Edit,
+            kind,
             uri_prefix: self.args.uri_prefix.clone(),
             allow_upload: self.args.allow_upload,
             allow_delete: self.args.allow_delete,
@@ -814,12 +847,15 @@ impl Server {
             },
             None => 1,
         };
-        let mut paths = match self.to_pathitem(path, &self.args.path).await? {
+        let mut paths = match self.to_pathitem(path, &self.args.serve_path).await? {
             Some(v) => vec![v],
             None => vec![],
         };
         if depth != 0 {
-            match self.list_dir(path, &self.args.path, access_paths).await {
+            match self
+                .list_dir(path, &self.args.serve_path, access_paths)
+                .await
+            {
                 Ok(child) => paths.extend(child),
                 Err(_) => {
                     status_forbid(res);
@@ -839,7 +875,7 @@ impl Server {
     }
 
     async fn handle_propfind_file(&self, path: &Path, res: &mut Response) -> Result<()> {
-        if let Some(pathitem) = self.to_pathitem(path, &self.args.path).await? {
+        if let Some(pathitem) = self.to_pathitem(path, &self.args.serve_path).await? {
             res_multistatus(res, &pathitem.to_dav_xml(self.args.uri_prefix.as_str()));
         } else {
             status_not_found(res);
@@ -939,17 +975,16 @@ impl Server {
         query_params: &HashMap<String, String>,
         head_only: bool,
         user: Option<String>,
+        access_paths: AccessPaths,
         res: &mut Response,
     ) -> Result<()> {
         if let Some(sort) = query_params.get("sort") {
             if sort == "name" {
-                paths.sort_by(|v1, v2| {
-                    alphanumeric_sort::compare_str(v1.name.to_lowercase(), v2.name.to_lowercase())
-                })
+                paths.sort_by(|v1, v2| v1.sort_by_name(v2))
             } else if sort == "mtime" {
-                paths.sort_by(|v1, v2| v1.mtime.cmp(&v2.mtime))
+                paths.sort_by(|v1, v2| v1.sort_by_mtime(v2))
             } else if sort == "size" {
-                paths.sort_by(|v1, v2| v1.size.unwrap_or(0).cmp(&v2.size.unwrap_or(0)))
+                paths.sort_by(|v1, v2| v1.sort_by_size(v2))
             }
             if query_params
                 .get("order")
@@ -959,7 +994,7 @@ impl Server {
                 paths.reverse()
             }
         } else {
-            paths.sort_unstable();
+            paths.sort_by(|v1, v2| v1.sort_by_name(v2))
         }
         if query_params.contains_key("simple") {
             let output = paths
@@ -983,13 +1018,17 @@ impl Server {
             }
             return Ok(());
         }
-        let href = format!("/{}", normalize_path(path.strip_prefix(&self.args.path)?));
+        let href = format!(
+            "/{}",
+            normalize_path(path.strip_prefix(&self.args.serve_path)?)
+        );
+        let readwrite = access_paths.perm().readwrite();
         let data = IndexData {
             kind: DataKind::Index,
             href,
             uri_prefix: self.args.uri_prefix.clone(),
-            allow_upload: self.args.allow_upload,
-            allow_delete: self.args.allow_delete,
+            allow_upload: self.args.allow_upload && readwrite,
+            allow_delete: self.args.allow_delete && readwrite,
             allow_search: self.args.allow_search,
             allow_archive: self.args.allow_archive,
             dir_exists: exist,
@@ -1010,6 +1049,12 @@ impl Server {
         };
         res.headers_mut()
             .typed_insert(ContentLength(output.as_bytes().len() as u64));
+        res.headers_mut()
+            .typed_insert(CacheControl::new().with_no_cache());
+        res.headers_mut().insert(
+            "x-content-type-options",
+            HeaderValue::from_static("nosniff"),
+        );
         if head_only {
             return Ok(());
         }
@@ -1018,9 +1063,9 @@ impl Server {
     }
 
     fn auth_reject(&self, res: &mut Response) -> Result<()> {
-        let value = self.args.auth_method.www_auth()?;
         set_webdav_headers(res);
-        res.headers_mut().insert(WWW_AUTHENTICATE, value.parse()?);
+        res.headers_mut()
+            .append(WWW_AUTHENTICATE, www_authenticate(&self.args)?);
         // set 401 to make the browser pop up the login box
         *res.status_mut() = StatusCode::UNAUTHORIZED;
         Ok(())
@@ -1030,7 +1075,7 @@ impl Server {
         fs::canonicalize(path)
             .await
             .ok()
-            .map(|v| v.starts_with(&self.args.path))
+            .map(|v| v.starts_with(&self.args.serve_path))
             .unwrap_or_default()
     }
 
@@ -1053,12 +1098,10 @@ impl Server {
         };
 
         let authorization = headers.get(AUTHORIZATION);
-        let guard = self.args.auth.guard(
-            &relative_path,
-            req.method(),
-            authorization,
-            self.args.auth_method.clone(),
-        );
+        let guard = self
+            .args
+            .auth
+            .guard(&relative_path, req.method(), authorization);
 
         match guard {
             (_, Some(_)) => {}
@@ -1098,14 +1141,14 @@ impl Server {
 
     fn join_path(&self, path: &str) -> Option<PathBuf> {
         if path.is_empty() {
-            return Some(self.args.path.clone());
+            return Some(self.args.serve_path.clone());
         }
         let path = if cfg!(windows) {
             path.replace('/', "\\")
         } else {
             path.to_string()
         };
-        Some(self.args.path.join(path))
+        Some(self.args.serve_path.join(path))
     }
 
     async fn list_dir(
@@ -1182,10 +1225,11 @@ impl Server {
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, PartialEq)]
 enum DataKind {
     Index,
     Edit,
+    View,
 }
 
 #[derive(Debug, Serialize)]
@@ -1272,17 +1316,68 @@ impl PathItem {
             ),
         }
     }
+
     pub fn base_name(&self) -> &str {
         self.name.split('/').last().unwrap_or_default()
     }
+
+    pub fn sort_by_name(&self, other: &Self) -> Ordering {
+        match self.path_type.cmp(&other.path_type) {
+            Ordering::Equal => {
+                alphanumeric_sort::compare_str(self.name.to_lowercase(), other.name.to_lowercase())
+            }
+            v => v,
+        }
+    }
+
+    pub fn sort_by_mtime(&self, other: &Self) -> Ordering {
+        match self.path_type.cmp(&other.path_type) {
+            Ordering::Equal => self.mtime.cmp(&other.mtime),
+            v => v,
+        }
+    }
+
+    pub fn sort_by_size(&self, other: &Self) -> Ordering {
+        match self.path_type.cmp(&other.path_type) {
+            Ordering::Equal => {
+                if self.is_dir() {
+                    alphanumeric_sort::compare_str(
+                        self.name.to_lowercase(),
+                        other.name.to_lowercase(),
+                    )
+                } else {
+                    self.size.unwrap_or(0).cmp(&other.size.unwrap_or(0))
+                }
+            }
+            v => v,
+        }
+    }
 }
 
-#[derive(Debug, Serialize, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(Debug, Serialize, Eq, PartialEq)]
 enum PathType {
     Dir,
     SymlinkDir,
     File,
     SymlinkFile,
+}
+
+impl Ord for PathType {
+    fn cmp(&self, other: &Self) -> Ordering {
+        let to_value = |t: &Self| -> u8 {
+            if matches!(t, Self::Dir | Self::SymlinkDir) {
+                0
+            } else {
+                1
+            }
+        };
+        to_value(self).cmp(&to_value(other))
+    }
+}
+impl PartialOrd for PathType {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
 }
 
 fn to_timestamp(time: &SystemTime) -> u64 {
@@ -1360,7 +1455,7 @@ async fn zip_dir<W: AsyncWrite + Unpin>(
             let mut it = WalkDir::new(&dir).into_iter();
             it.next();
             while let Some(Ok(entry)) = it.next() {
-                if !running.load(Ordering::SeqCst) {
+                if !running.load(atomic::Ordering::SeqCst) {
                     break;
                 }
                 let entry_path = entry.path();
