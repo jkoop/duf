@@ -807,7 +807,6 @@ function formatSize(size) {
 
 function getSizeHTML(size) {
   const formattedSize = formatSize(size);
-  console.log(formattedSize)
   if (("" + formattedSize.major).length < 3 && formattedSize.unit != 'B') {
     return `${formattedSize.major}<span class="size-minor-part">.${("" + formattedSize.minor + ".0").substring(2, 5 - ("" + formattedSize.major).length)}</span> ${formattedSize.unit}`;
   } else if (formattedSize.major != undefined) {
